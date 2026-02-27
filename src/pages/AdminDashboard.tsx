@@ -17,14 +17,13 @@ import axios from "axios";
 import { Dialog, Transition } from "@headlessui/react";
 import { Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
+import { toast } from "sonner";
 
 // Register Chart.js components
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-// Your real deployed backend
 const API_BASE = "https://dolly-backend-fjlu.onrender.com";
 
-// formatPrice helper – Kenyan Shillings
 const formatPrice = (num: number) =>
   new Intl.NumberFormat("en-KE", {
     style: "currency",
@@ -43,11 +42,8 @@ interface Product {
   category: string;
   stock: number;
   featured?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
-// New interface for admins
 interface AdminUser {
   _id: string;
   name: string;
@@ -55,22 +51,44 @@ interface AdminUser {
   role: string;
 }
 
-// New interface for orders
 interface Order {
   _id: string;
   customerName: string;
   phone: string;
   email: string;
   status: "Pending" | "Paid" | "Delivered" | "Cancelled";
+  totalAmount: number;
+  items: Array<{
+    productId: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
   createdAt: string;
+  paymentMethod?: string;
+  notes?: string;
 }
 
 export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+  const [currentAdmin, setCurrentAdmin] = useState<any>(null);
 
-  // Tab navigation
+  // Login form
+  const [loginEmail, setLoginEmail] = useState("leon29kae@gmail.com");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // Change password modal (first login)
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [changeError, setChangeError] = useState("");
+  const [changeLoading, setChangeLoading] = useState(false);
+
+  // Existing states
   const [activeTab, setActiveTab] = useState<"products" | "users" | "orders">(
     "products",
   );
@@ -80,7 +98,6 @@ export default function AdminDashboard() {
   const [actionLoading, setActionLoading] = useState(false);
   const [fetchError, setFetchError] = useState("");
 
-  // Users / Admins
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
   const [adminForm, setAdminForm] = useState({
@@ -89,11 +106,10 @@ export default function AdminDashboard() {
     password: "",
   });
 
-  // Orders
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
 
-  // Modal & form (existing product modal unchanged)
+  // Product modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -107,13 +123,126 @@ export default function AdminDashboard() {
     featured: false,
   });
 
+  // Check for existing session on mount
   useEffect(() => {
-    if (authenticated) {
+    const storedToken = localStorage.getItem("adminToken");
+    const storedAdmin = localStorage.getItem("adminData");
+
+    if (storedToken && storedAdmin) {
+      try {
+        const parsedAdmin = JSON.parse(storedAdmin);
+        setToken(storedToken);
+        setCurrentAdmin(parsedAdmin);
+        setAuthenticated(true);
+      } catch (err) {
+        localStorage.removeItem("adminToken");
+        localStorage.removeItem("adminData");
+      }
+    }
+  }, []);
+
+  // Fetch data when authenticated
+  useEffect(() => {
+    if (authenticated && token) {
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+
       fetchProducts();
       fetchAdmins();
       fetchOrders();
+
+      // Force password change on first login
+      if (currentAdmin?.needsPasswordChange) {
+        setShowChangePassword(true);
+        toast.info("For security reasons, please set a new password now.");
+      }
     }
-  }, [authenticated]);
+  }, [authenticated, token]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    setLoginLoading(true);
+
+    try {
+      const res = await axios.post(`${API_BASE}/auth/login`, {
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
+
+      const { token: newToken, admin } = res.data;
+
+      localStorage.setItem("adminToken", newToken);
+      localStorage.setItem("adminData", JSON.stringify(admin));
+
+      setToken(newToken);
+      setCurrentAdmin(admin);
+      setAuthenticated(true);
+      toast.success("Login successful");
+
+      if (admin.needsPasswordChange) {
+        setShowChangePassword(true);
+      }
+    } catch (err: any) {
+      setLoginError(
+        err.response?.data?.error ||
+          "Login failed. Please check your credentials.",
+      );
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangeError("");
+    setChangeLoading(true);
+
+    if (newPassword !== confirmNewPassword) {
+      setChangeError("New passwords do not match");
+      setChangeLoading(false);
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setChangeError("New password must be at least 6 characters long");
+      setChangeLoading(false);
+      return;
+    }
+
+    try {
+      await axios.patch(
+        `${API_BASE}/admins/${currentAdmin._id}/password`,
+        {
+          currentPassword: currentPassword || loginPassword,
+          newPassword,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      toast.success("Password updated successfully. Please log in again.");
+      handleLogout();
+    } catch (err: any) {
+      setChangeError(
+        err.response?.data?.error || "Failed to update password. Try again.",
+      );
+    } finally {
+      setChangeLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminData");
+    delete axios.defaults.headers.common["Authorization"];
+    setAuthenticated(false);
+    setToken(null);
+    setCurrentAdmin(null);
+    setShowChangePassword(false);
+    setLoginPassword("");
+    toast.info("You have been logged out");
+  };
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -124,18 +253,16 @@ export default function AdminDashboard() {
       });
       setProducts(res.data || []);
     } catch (err: any) {
-      console.error("Fetch error:", err);
       setFetchError(
         err.code === "ECONNABORTED"
           ? "Backend is waking up (Render free tier delay). Try again in 20–40 seconds."
-          : "Failed to load products. Check if backend is running.",
+          : "Failed to load products.",
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // New: Fetch admins
   const fetchAdmins = async () => {
     setLoadingAdmins(true);
     try {
@@ -148,19 +275,18 @@ export default function AdminDashboard() {
     }
   };
 
-  // New: Add admin
   const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/admins`, adminForm);
       setAdminForm({ name: "", email: "", password: "" });
       fetchAdmins();
+      toast.success("Admin added");
     } catch (err) {
-      alert("Failed to add admin");
+      toast.error("Failed to add admin");
     }
   };
 
-  // New: Fetch orders
   const fetchOrders = async () => {
     setLoadingOrders(true);
     try {
@@ -168,22 +294,23 @@ export default function AdminDashboard() {
       setOrders(res.data || []);
     } catch (err) {
       console.error("Failed to load orders:", err);
+      toast.error("Could not load orders");
     } finally {
       setLoadingOrders(false);
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password === "admin123") {
-      setAuthenticated(true);
-      setError("");
-    } else {
-      setError("Invalid password. (Hint: admin123 for demo)");
+  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+    if (!confirm(`Change status to ${newStatus}?`)) return;
+    try {
+      await axios.patch(`${API_BASE}/orders/${orderId}`, { status: newStatus });
+      toast.success(`Order updated to ${newStatus}`);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Failed to update status");
     }
   };
 
-  // Existing product modal handlers (unchanged)
   const openAddModal = () => {
     setEditingProduct(null);
     setFormData({
@@ -237,21 +364,18 @@ export default function AdminDashboard() {
         await axios.put(
           `${API_BASE}/products/${editingProduct._id}`,
           formData,
-          { timeout: 30000 },
+          {
+            timeout: 30000,
+          },
         );
       } else {
-        await axios.post(`${API_BASE}/products`, formData, {
-          timeout: 30000,
-        });
+        await axios.post(`${API_BASE}/products`, formData, { timeout: 30000 });
       }
       setIsModalOpen(false);
       await fetchProducts();
+      toast.success(editingProduct ? "Product updated" : "Product created");
     } catch (err: any) {
-      console.error("Save error:", err);
-      alert(
-        err.response?.data?.error ||
-          "Failed to save product. Backend may be slow — try again.",
-      );
+      toast.error(err.response?.data?.error || "Failed to save product");
     } finally {
       setActionLoading(false);
     }
@@ -263,37 +387,67 @@ export default function AdminDashboard() {
     try {
       await axios.delete(`${API_BASE}/products/${id}`, { timeout: 20000 });
       await fetchProducts();
-    } catch (err: any) {
-      console.error("Delete error:", err);
-      alert("Failed to delete product.");
+      toast.success("Product deleted");
+    } catch (err) {
+      toast.error("Failed to delete product");
     } finally {
       setActionLoading(false);
     }
   };
 
+  // ────────────────────────────────────────────────
+  // Login Screen
+  // ────────────────────────────────────────────────
   if (!authenticated) {
-    // Login screen unchanged
     return (
-      <div className="container mx-auto px-4 py-16 max-w-sm animate-fade-in">
-        <div className="bg-card rounded-lg border p-8 text-center shadow-lg">
-          <Lock className="h-12 w-12 text-accent mx-auto mb-4" />
-          <h1 className="font-display text-2xl font-bold text-card-foreground mb-2">
-            Admin Access
-          </h1>
-          <p className="text-sm text-muted-foreground mb-6">
-            Enter password to continue
+      <div className="container mx-auto px-4 py-16 max-w-md animate-fade-in">
+        <div className="bg-card rounded-xl border p-8 shadow-lg">
+          <Lock className="h-12 w-12 text-accent mx-auto mb-6" />
+          <h1 className="text-2xl font-bold text-center mb-2">Admin Login</h1>
+          <p className="text-center text-muted-foreground mb-8">
+            Sign in to manage your store
           </p>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              className="w-full px-4 py-2.5 rounded-md border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-accent text-sm"
-              autoFocus
-            />
-            {error && <p className="text-destructive text-sm">{error}</p>}
-            <button type="submit" className="btn-accent w-full py-2.5">
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Email</label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                placeholder="leon29kae@gmail.com"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                Password
+              </label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                placeholder="Enter your password"
+                required
+                autoFocus
+              />
+            </div>
+
+            {loginError && (
+              <p className="text-destructive text-sm text-center">
+                {loginError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full bg-accent text-accent-foreground py-2.5 rounded-md font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loginLoading && <Loader2 className="h-5 w-5 animate-spin" />}
               Login
             </button>
           </form>
@@ -302,21 +456,132 @@ export default function AdminDashboard() {
     );
   }
 
-  // Stats (unchanged)
+  // ────────────────────────────────────────────────
+  // Change Password Modal (first login only)
+  // ────────────────────────────────────────────────
+  const ChangePasswordModal = () => (
+    <Transition appear show={showChangePassword} as={Fragment}>
+      <Dialog as="div" className="relative z-50" onClose={() => {}}>
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-300"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-200"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="fixed inset-0 bg-black/50" />
+        </Transition.Child>
+
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-300"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-200"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-card p-8 text-left shadow-xl border">
+                <Dialog.Title as="h3" className="text-xl font-bold mb-6">
+                  Set Your New Admin Password
+                </Dialog.Title>
+
+                <p className="text-muted-foreground mb-6">
+                  For security, please create a new strong password. You will
+                  need to log in again after this step.
+                </p>
+
+                <form onSubmit={handleChangePassword} className="space-y-5">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">
+                      Current Password
+                    </label>
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                      required
+                      placeholder="The password you just used to log in"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">
+                      New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                      required
+                      minLength={6}
+                      placeholder="At least 6 characters"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                      required
+                      placeholder="Re-enter new password"
+                    />
+                  </div>
+
+                  {changeError && (
+                    <p className="text-destructive text-sm">{changeError}</p>
+                  )}
+
+                  <div className="mt-8 flex justify-end gap-4">
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="px-5 py-2.5 border rounded-md hover:bg-muted transition"
+                    >
+                      Logout instead
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={changeLoading}
+                      className="px-6 py-2.5 bg-accent text-accent-foreground rounded-md hover:opacity-90 transition disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {changeLoading && (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      )}
+                      Update Password
+                    </button>
+                  </div>
+                </form>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </div>
+      </Dialog>
+    </Transition>
+  );
+
+  // ────────────────────────────────────────────────
+  // Main Dashboard
+  // ────────────────────────────────────────────────
   const totalProducts = products.length;
   const inStock = products.filter((p) => p.stock > 0).length;
   const outOfStock = products.filter((p) => p.stock === 0).length;
   const lowStock = products.filter((p) => 0 < p.stock && p.stock <= 5).length;
   const totalValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
-  const avgPrice =
-    totalProducts > 0
-      ? (products.reduce((sum, p) => sum + p.price, 0) / totalProducts).toFixed(
-          2,
-        )
-      : "0.00";
 
   const pieData = {
-    labels: ["In Stock (good)", "Low Stock", "Out of Stock"],
+    labels: ["In Stock", "Low Stock", "Out of Stock"],
     datasets: [
       {
         data: [inStock - lowStock, lowStock, outOfStock],
@@ -327,53 +592,42 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 animate-fade-in min-h-screen">
+    <div className="container mx-auto px-4 py-8 min-h-screen animate-fade-in">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="section-heading text-3xl font-bold">Admin Dashboard</h1>
-        <button
-          onClick={() => setAuthenticated(false)}
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Logout
-        </button>
-      </div>
-
-      {/* Tab Navigation - Added */}
-      <div className="mb-6 border-b">
-        <div className="flex space-x-8">
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-muted-foreground hidden sm:inline">
+            {currentAdmin?.email || "Admin"}
+          </span>
           <button
-            onClick={() => setActiveTab("products")}
-            className={`pb-3 font-medium ${
-              activeTab === "products"
-                ? "border-b-2 border-accent text-accent"
-                : "text-muted-foreground"
-            }`}
+            onClick={handleLogout}
+            className="text-sm px-4 py-2 border border-destructive/30 text-destructive hover:bg-destructive/10 rounded-md transition"
           >
-            Products
-          </button>
-          <button
-            onClick={() => setActiveTab("users")}
-            className={`pb-3 font-medium ${
-              activeTab === "users"
-                ? "border-b-2 border-accent text-accent"
-                : "text-muted-foreground"
-            }`}
-          >
-            Admins
-          </button>
-          <button
-            onClick={() => setActiveTab("orders")}
-            className={`pb-3 font-medium ${
-              activeTab === "orders"
-                ? "border-b-2 border-accent text-accent"
-                : "text-muted-foreground"
-            }`}
-          >
-            Orders
+            Logout
           </button>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="mb-6 border-b">
+        <div className="flex space-x-8">
+          {["products", "users", "orders"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab as any)}
+              className={`pb-3 font-medium capitalize ${
+                activeTab === tab
+                  ? "border-b-2 border-accent text-accent"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* PRODUCTS TAB */}
       {activeTab === "products" && (
         <>
           {fetchError && (
@@ -389,7 +643,7 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <>
-              {/* Stats - unchanged */}
+              {/* Stats */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
                 {[
                   {
@@ -440,7 +694,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
 
-              {/* Pie Chart - unchanged */}
+              {/* Pie Chart */}
               {totalProducts > 0 && (
                 <div className="bg-card rounded-lg border p-6 mb-8 shadow-sm">
                   <h2 className="text-lg font-semibold mb-4">
@@ -458,17 +712,16 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Existing Products Table - unchanged */}
+              {/* Products Table */}
               <div className="bg-card rounded-lg border overflow-hidden shadow-sm">
                 <div className="p-4 border-b flex justify-between items-center">
                   <h2 className="text-lg font-semibold">Products</h2>
                   <button
                     onClick={openAddModal}
                     disabled={actionLoading}
-                    className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:opacity-90 transition disabled:opacity-50"
+                    className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:opacity-90 disabled:opacity-50"
                   >
-                    <Plus size={18} />
-                    Add Product
+                    <Plus size={18} /> Add Product
                   </button>
                 </div>
 
@@ -506,16 +759,16 @@ export default function AdminDashboard() {
                             colSpan={7}
                             className="text-center py-12 text-muted-foreground"
                           >
-                            No products yet. Click "Add Product" to create one.
+                            No products yet. Add one to get started.
                           </td>
                         </tr>
                       ) : (
                         products.map((p) => (
                           <tr
                             key={p._id}
-                            className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                            className="border-b last:border-0 hover:bg-muted/30"
                           >
-                            <td className="px-6 py-4 font-mono text-sm text-muted-foreground">
+                            <td className="px-6 py-4 font-mono text-muted-foreground">
                               {p.id || "—"}
                             </td>
                             <td className="px-6 py-4 font-medium">{p.name}</td>
@@ -528,11 +781,11 @@ export default function AdminDashboard() {
                             <td className="px-6 py-4 text-right">{p.stock}</td>
                             <td className="px-6 py-4 text-center">
                               {p.featured ? (
-                                <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-green-500/20 text-green-700 dark:text-green-400">
+                                <span className="inline-block px-2.5 py-1 text-xs rounded-full bg-green-500/20 text-green-700">
                                   Yes
                                 </span>
                               ) : (
-                                <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-gray-500/20 text-gray-700 dark:text-gray-400">
+                                <span className="inline-block px-2.5 py-1 text-xs rounded-full bg-gray-500/20 text-gray-700">
                                   No
                                 </span>
                               )}
@@ -542,7 +795,6 @@ export default function AdminDashboard() {
                                 onClick={() => openEditModal(p)}
                                 disabled={actionLoading}
                                 className="text-accent hover:text-accent/80 disabled:opacity-50"
-                                title="Edit"
                               >
                                 <Edit size={18} />
                               </button>
@@ -550,7 +802,6 @@ export default function AdminDashboard() {
                                 onClick={() => handleDelete(p._id)}
                                 disabled={actionLoading}
                                 className="text-destructive hover:text-destructive/80 disabled:opacity-50"
-                                title="Delete"
                               >
                                 <Trash2 size={18} />
                               </button>
@@ -567,6 +818,7 @@ export default function AdminDashboard() {
         </>
       )}
 
+      {/* USERS / ADMINS TAB */}
       {activeTab === "users" && (
         <div className="bg-card rounded-lg border p-6 shadow-sm">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -579,7 +831,6 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <>
-              {/* Add Admin Form */}
               <form
                 onSubmit={handleAddAdmin}
                 className="mb-8 bg-muted/30 p-5 rounded-lg border"
@@ -631,7 +882,6 @@ export default function AdminDashboard() {
                 </div>
               </form>
 
-              {/* Admins List */}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -667,8 +917,11 @@ export default function AdminDashboard() {
                                 if (confirm(`Remove ${admin.name}?`)) {
                                   axios
                                     .delete(`${API_BASE}/admins/${admin._id}`)
-                                    .then(() => fetchAdmins())
-                                    .catch(() => alert("Delete failed"));
+                                    .then(() => {
+                                      fetchAdmins();
+                                      toast.success("Admin removed");
+                                    })
+                                    .catch(() => toast.error("Delete failed"));
                                 }
                               }}
                               className="text-destructive hover:underline"
@@ -687,6 +940,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* ORDERS TAB */}
       {activeTab === "orders" && (
         <div className="bg-card rounded-lg border p-6 shadow-sm">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -697,56 +951,67 @@ export default function AdminDashboard() {
             <div className="flex justify-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-accent" />
             </div>
+          ) : orders.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              No orders received yet.
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left px-6 py-3">Name</th>
+                    <th className="text-left px-6 py-3">Customer</th>
                     <th className="text-left px-6 py-3">Phone</th>
-                    <th className="text-left px-6 py-3">Email</th>
+                    <th className="text-left px-6 py-3">Items</th>
+                    <th className="text-right px-6 py-3">Total</th>
+                    <th className="text-left px-6 py-3">Date</th>
                     <th className="text-center px-6 py-3">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="text-center py-8 text-muted-foreground"
-                      >
-                        No orders received yet.
+                  {orders.map((order) => (
+                    <tr key={order._id} className="border-b hover:bg-muted/30">
+                      <td className="px-6 py-4 font-medium">
+                        {order.customerName}
+                      </td>
+                      <td className="px-6 py-4">{order.phone}</td>
+                      <td className="px-6 py-4">
+                        {order.items.length} item
+                        {order.items.length !== 1 ? "s" : ""}
+                      </td>
+                      <td className="px-6 py-4 text-right font-medium">
+                        {formatPrice(order.totalAmount)}
+                      </td>
+                      <td className="px-6 py-4 text-muted-foreground">
+                        {new Date(order.createdAt).toLocaleString("en-KE", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <select
+                          value={order.status}
+                          onChange={(e) =>
+                            updateOrderStatus(order._id, e.target.value)
+                          }
+                          className={`text-xs font-medium px-3 py-1.5 rounded-full border appearance-none cursor-pointer ${
+                            order.status === "Delivered"
+                              ? "bg-green-100 text-green-800 border-green-300"
+                              : order.status === "Paid"
+                                ? "bg-blue-100 text-blue-800 border-blue-300"
+                                : order.status === "Pending"
+                                  ? "bg-yellow-100 text-yellow-800 border-yellow-300"
+                                  : "bg-red-100 text-red-800 border-red-300"
+                          }`}
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="Paid">Paid</option>
+                          <option value="Delivered">Delivered</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
                       </td>
                     </tr>
-                  ) : (
-                    orders.map((order) => (
-                      <tr
-                        key={order._id}
-                        className="border-b hover:bg-muted/30"
-                      >
-                        <td className="px-6 py-4">{order.customerName}</td>
-                        <td className="px-6 py-4">{order.phone}</td>
-                        <td className="px-6 py-4 text-muted-foreground">
-                          {order.email}
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span
-                            className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
-                              order.status === "Delivered"
-                                ? "bg-green-500/20 text-green-700"
-                                : order.status === "Paid"
-                                  ? "bg-blue-500/20 text-blue-700"
-                                  : order.status === "Pending"
-                                    ? "bg-yellow-500/20 text-yellow-700"
-                                    : "bg-red-500/20 text-red-700"
-                            }`}
-                          >
-                            {order.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -754,7 +1019,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Existing Product Modal - completely unchanged */}
+      {/* Product Modal */}
       <Transition appear show={isModalOpen} as={Fragment}>
         <Dialog
           as="div"
@@ -784,7 +1049,7 @@ export default function AdminDashboard() {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-2xl bg-card p-6 text-left align-middle shadow-xl transition-all border">
+                <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-2xl bg-card p-6 text-left shadow-xl border">
                   <Dialog.Title
                     as="h3"
                     className="text-lg font-medium leading-6"
@@ -795,7 +1060,7 @@ export default function AdminDashboard() {
                   <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Unique Product ID (e.g. P-001, ITEM-123)
+                        Unique Product ID (e.g. P-001)
                       </label>
                       <input
                         name="id"
@@ -817,7 +1082,7 @@ export default function AdminDashboard() {
                         onChange={handleFormChange}
                         className="w-full px-3 py-2 border rounded-md bg-background"
                         required
-                        placeholder="e.g. DeWalt 20V Cordless Drill"
+                        placeholder="e.g. Cordless Drill"
                       />
                     </div>
 
@@ -830,7 +1095,7 @@ export default function AdminDashboard() {
                         value={formData.description}
                         onChange={handleFormChange}
                         className="w-full px-3 py-2 border rounded-md bg-background min-h-[80px]"
-                        placeholder="Powerful 20V MAX cordless drill/driver..."
+                        placeholder="Product details..."
                       />
                     </div>
 
@@ -848,7 +1113,6 @@ export default function AdminDashboard() {
                           onChange={handleFormChange}
                           className="w-full px-3 py-2 border rounded-md bg-background"
                           required
-                          placeholder="1000"
                         />
                       </div>
                       <div>
@@ -890,7 +1154,7 @@ export default function AdminDashboard() {
                           value={formData.image}
                           onChange={handleFormChange}
                           className="w-full px-3 py-2 border rounded-md bg-background"
-                          placeholder="https://images.unsplash.com/..."
+                          placeholder="https://..."
                         />
                       </div>
                     </div>
@@ -936,6 +1200,9 @@ export default function AdminDashboard() {
           </div>
         </Dialog>
       </Transition>
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal />
     </div>
   );
 }
