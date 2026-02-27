@@ -42,15 +42,15 @@ const Footer = () => {
             <div className="space-y-3 text-sm text-primary-foreground/70">
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-accent shrink-0" />
-                <span>123 Industrial Road, Nairobi, Kenya</span>
+                <span>Fedha Estate</span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-accent shrink-0" />
-                <span>+254 700 123 456</span>
+                <span>+254 29 724 925</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-accent shrink-0" />
-                <span>info@dollyshardware.co.ke</span>
+                <span>stevetunechi95@gmail.com</span>
               </div>
             </div>
             <div className="flex gap-4 mt-4">
