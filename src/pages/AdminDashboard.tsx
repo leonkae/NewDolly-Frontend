@@ -22,15 +22,18 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 // Your real deployed backend
 const API_BASE = "https://dolly-backend-fjlu.onrender.com";
 
-// formatPrice helper (you can move this to a utils file later)
+// formatPrice helper – updated for Kenyan Shillings with 2 decimal places
 const formatPrice = (num: number) =>
-  new Intl.NumberFormat("en-US", {
+  new Intl.NumberFormat("en-KE", {
     style: "currency",
-    currency: "USD",
+    currency: "KES",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(num);
 
 interface Product {
   _id: string; // MongoDB uses _id
+  id: string; // ← the custom unique ID entered by user
   name: string;
   description?: string;
   price: number;
@@ -56,6 +59,7 @@ export default function AdminDashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
+    id: "", // ← added for user-entered unique ID
     name: "",
     description: "",
     price: 0,
@@ -75,9 +79,8 @@ export default function AdminDashboard() {
     setLoading(true);
     setFetchError("");
     try {
-      // Increased timeout because Render free tier cold starts can be slow
       const res = await axios.get<Product[]>(`${API_BASE}/products`, {
-        timeout: 45000, // 45 seconds
+        timeout: 45000,
       });
       setProducts(res.data || []);
     } catch (err: any) {
@@ -106,6 +109,7 @@ export default function AdminDashboard() {
   const openAddModal = () => {
     setEditingProduct(null);
     setFormData({
+      id: "", // ← added
       name: "",
       description: "",
       price: 0,
@@ -120,6 +124,7 @@ export default function AdminDashboard() {
   const openEditModal = (product: Product) => {
     setEditingProduct(product);
     setFormData({
+      id: product.id || "", // ← added
       name: product.name,
       description: product.description || "",
       price: product.price,
@@ -354,6 +359,7 @@ export default function AdminDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="text-left px-6 py-3 font-semibold">ID</th>
                     <th className="text-left px-6 py-3 font-semibold">
                       Product
                     </th>
@@ -378,7 +384,7 @@ export default function AdminDashboard() {
                   {products.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="text-center py-12 text-muted-foreground"
                       >
                         No products yet. Click "Add Product" to create one.
@@ -390,6 +396,9 @@ export default function AdminDashboard() {
                         key={p._id}
                         className="border-b last:border-0 hover:bg-muted/30 transition-colors"
                       >
+                        <td className="px-6 py-4 font-mono text-sm text-muted-foreground">
+                          {p._id || "—"}
+                        </td>
                         <td className="px-6 py-4 font-medium">{p.name}</td>
                         <td className="px-6 py-4 text-muted-foreground">
                           {p.category}
@@ -478,6 +487,20 @@ export default function AdminDashboard() {
                   <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">
+                        Unique Product ID (e.g. P-001, ITEM-123)
+                      </label>
+                      <input
+                        name="id"
+                        value={formData.id}
+                        onChange={handleFormChange}
+                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        required
+                        placeholder="P-001"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
                         Product Name
                       </label>
                       <input
@@ -506,18 +529,18 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium mb-1">
-                          Price (cents)
+                          Price (KSh)
                         </label>
                         <input
                           name="price"
                           type="number"
-                          step="1"
+                          step="0.01"
                           min="0"
                           value={formData.price}
                           onChange={handleFormChange}
                           className="w-full px-3 py-2 border rounded-md bg-background"
                           required
-                          placeholder="8999"
+                          placeholder="1000"
                         />
                       </div>
                       <div>
