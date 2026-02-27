@@ -1,12 +1,46 @@
-import { Link } from "react-router-dom";
-import { ArrowRight, Shield, Truck, Clock } from "lucide-react";
-import ProductCard from "@/components/ProductCard";
-import { products } from "@/data/products";
-import heroImage from "@/assets/hero-hardware.jpg";
+"use client";
 
-const featuredProducts = products.filter((p) => p.featured).slice(0, 4);
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { ArrowRight, Shield, Truck, Clock, Loader2 } from "lucide-react";
+import ProductCard from "@/components/ProductCard";
+import axios from "axios";
+import heroImage from "@/assets/hero-hardware.jpg";
+import { Product } from "@/types";  // ← Import the shared/global Product type
+
+const API_BASE = "https://dolly-backend-fjlu.onrender.com";
 
 const Home = () => {
+  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+
+  useEffect(() => {
+    const fetchFeatured = async () => {
+      try {
+        setLoading(true);
+        setFetchError("");
+        const res = await axios.get<Product[]>(`${API_BASE}/products`, {
+          timeout: 45000, // generous for Render cold start
+        });
+        // Filter only featured products
+        const featured = res.data.filter((p) => p.featured).slice(0, 4);
+        setFeaturedProducts(featured);
+      } catch (err: any) {
+        console.error("Featured products fetch error:", err);
+        setFetchError(
+          err.code === "ECONNABORTED"
+            ? "Loading featured products... backend waking up (wait 20–60s)"
+            : "Failed to load featured products."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFeatured();
+  }, []);
+
   return (
     <div className="animate-fade-in">
       {/* Hero Section */}
@@ -64,7 +98,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Featured Products */}
+      {/* Featured Products - dynamic */}
       <section className="container mx-auto px-4 py-16">
         <div className="flex items-center justify-between mb-8">
           <h2 className="section-heading">Featured Products</h2>
@@ -75,11 +109,33 @@ const Home = () => {
             View All <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {featuredProducts.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+
+        {loading ? (
+          <div className="text-center py-16 flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-accent" />
+            <p className="text-muted-foreground">Loading featured products...</p>
+          </div>
+        ) : fetchError ? (
+          <div className="text-center py-16 text-destructive">
+            <p>{fetchError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 text-accent hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : featuredProducts.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <p>No featured products available right now.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {featuredProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* CTA */}

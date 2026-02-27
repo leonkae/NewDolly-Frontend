@@ -1,9 +1,13 @@
-import { useState, useMemo } from "react";
+"use client";
+
+import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
 import ProductCard from "@/components/ProductCard";
-import { products } from "@/data/products";
-import { CATEGORIES } from "@/types";
+import axios from "axios";
+import { Product } from "@/types"; // ← import shared type (this fixes the error)
+
+const API_BASE = "https://dolly-backend-fjlu.onrender.com";
 
 const Products = () => {
   const [searchParams] = useSearchParams();
@@ -11,16 +15,51 @@ const Products = () => {
   const [search, setSearch] = useState(initialSearch);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        setFetchError("");
+        const res = await axios.get<Product[]>(`${API_BASE}/products`, {
+          timeout: 45000,
+        });
+        setProducts(res.data || []);
+      } catch (err: any) {
+        console.error("Products fetch error:", err);
+        setFetchError(
+          err.code === "ECONNABORTED"
+            ? "Loading products... backend waking up (wait 20–60s)"
+            : "Failed to load products. Please try again later.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProducts();
+  }, []);
+
+  // Dynamic categories from real data
+  const categories = useMemo(() => {
+    const cats = new Set(products.map((p) => p.category));
+    return ["All", ...Array.from(cats).sort()];
+  }, [products]);
+
   const filtered = useMemo(() => {
     return products.filter((p) => {
       const matchSearch =
         !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.description.toLowerCase().includes(search.toLowerCase());
-      const matchCategory = selectedCategory === "All" || p.category === selectedCategory;
+        (p.description || "").toLowerCase().includes(search.toLowerCase());
+      const matchCategory =
+        selectedCategory === "All" || p.category === selectedCategory;
       return matchSearch && matchCategory;
     });
-  }, [search, selectedCategory]);
+  }, [products, search, selectedCategory]);
 
   return (
     <div className="container mx-auto px-4 py-8 animate-fade-in">
@@ -39,7 +78,7 @@ const Products = () => {
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          {["All", ...CATEGORIES].map((cat) => (
+          {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
@@ -55,12 +94,32 @@ const Products = () => {
         </div>
       </div>
 
-      {/* Results */}
-      {filtered.length === 0 ? (
+      {/* Loading / Error / Results */}
+      {loading ? (
+        <div className="text-center py-16 flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-accent" />
+          <p className="text-muted-foreground">
+            Loading products from server...
+          </p>
+        </div>
+      ) : fetchError ? (
+        <div className="text-center py-16 text-destructive">
+          <p>{fetchError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 text-accent hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-muted-foreground text-lg">No products found.</p>
           <button
-            onClick={() => { setSearch(""); setSelectedCategory("All"); }}
+            onClick={() => {
+              setSearch("");
+              setSelectedCategory("All");
+            }}
             className="mt-3 text-accent hover:text-orange-hover font-medium text-sm"
           >
             Clear filters

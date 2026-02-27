@@ -10,6 +10,8 @@ import {
   Edit,
   Trash2,
   Loader2,
+  Users,
+  ShoppingCart,
 } from "lucide-react";
 import axios from "axios";
 import { Dialog, Transition } from "@headlessui/react";
@@ -22,7 +24,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 // Your real deployed backend
 const API_BASE = "https://dolly-backend-fjlu.onrender.com";
 
-// formatPrice helper – updated for Kenyan Shillings with 2 decimal places
+// formatPrice helper – Kenyan Shillings
 const formatPrice = (num: number) =>
   new Intl.NumberFormat("en-KE", {
     style: "currency",
@@ -32,8 +34,8 @@ const formatPrice = (num: number) =>
   }).format(num);
 
 interface Product {
-  _id: string; // MongoDB uses _id
-  id: string; // ← the custom unique ID entered by user
+  _id: string;
+  id: string;
   name: string;
   description?: string;
   price: number;
@@ -45,21 +47,57 @@ interface Product {
   updatedAt?: string;
 }
 
+// New interface for admins
+interface AdminUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+// New interface for orders
+interface Order {
+  _id: string;
+  customerName: string;
+  phone: string;
+  email: string;
+  status: "Pending" | "Paid" | "Delivered" | "Cancelled";
+  createdAt: string;
+}
+
 export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+
+  // Tab navigation
+  const [activeTab, setActiveTab] = useState<"products" | "users" | "orders">(
+    "products",
+  );
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [fetchError, setFetchError] = useState("");
 
-  // Modal & form
+  // Users / Admins
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+  const [adminForm, setAdminForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+  });
+
+  // Orders
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  // Modal & form (existing product modal unchanged)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
-    id: "", // ← added for user-entered unique ID
+    id: "",
     name: "",
     description: "",
     price: 0,
@@ -72,6 +110,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (authenticated) {
       fetchProducts();
+      fetchAdmins();
+      fetchOrders();
     }
   }, [authenticated]);
 
@@ -95,6 +135,44 @@ export default function AdminDashboard() {
     }
   };
 
+  // New: Fetch admins
+  const fetchAdmins = async () => {
+    setLoadingAdmins(true);
+    try {
+      const res = await axios.get<AdminUser[]>(`${API_BASE}/admins`);
+      setAdmins(res.data || []);
+    } catch (err) {
+      console.error("Failed to load admins:", err);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+
+  // New: Add admin
+  const handleAddAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${API_BASE}/admins`, adminForm);
+      setAdminForm({ name: "", email: "", password: "" });
+      fetchAdmins();
+    } catch (err) {
+      alert("Failed to add admin");
+    }
+  };
+
+  // New: Fetch orders
+  const fetchOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const res = await axios.get<Order[]>(`${API_BASE}/orders`);
+      setOrders(res.data || []);
+    } catch (err) {
+      console.error("Failed to load orders:", err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (password === "admin123") {
@@ -105,11 +183,11 @@ export default function AdminDashboard() {
     }
   };
 
-  // Modal open handlers
+  // Existing product modal handlers (unchanged)
   const openAddModal = () => {
     setEditingProduct(null);
     setFormData({
-      id: "", // ← added
+      id: "",
       name: "",
       description: "",
       price: 0,
@@ -124,7 +202,7 @@ export default function AdminDashboard() {
   const openEditModal = (product: Product) => {
     setEditingProduct(product);
     setFormData({
-      id: product.id || "", // ← added
+      id: product.id || "",
       name: product.name,
       description: product.description || "",
       price: product.price,
@@ -159,9 +237,7 @@ export default function AdminDashboard() {
         await axios.put(
           `${API_BASE}/products/${editingProduct._id}`,
           formData,
-          {
-            timeout: 30000,
-          },
+          { timeout: 30000 },
         );
       } else {
         await axios.post(`${API_BASE}/products`, formData, {
@@ -196,6 +272,7 @@ export default function AdminDashboard() {
   };
 
   if (!authenticated) {
+    // Login screen unchanged
     return (
       <div className="container mx-auto px-4 py-16 max-w-sm animate-fade-in">
         <div className="bg-card rounded-lg border p-8 text-center shadow-lg">
@@ -225,7 +302,7 @@ export default function AdminDashboard() {
     );
   }
 
-  // Stats
+  // Stats (unchanged)
   const totalProducts = products.length;
   const inStock = products.filter((p) => p.stock > 0).length;
   const outOfStock = products.filter((p) => p.stock === 0).length;
@@ -261,180 +338,411 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {fetchError && (
-        <div className="bg-destructive/20 text-destructive p-4 rounded-md mb-6">
-          {fetchError}
+      {/* Tab Navigation - Added */}
+      <div className="mb-6 border-b">
+        <div className="flex space-x-8">
+          <button
+            onClick={() => setActiveTab("products")}
+            className={`pb-3 font-medium ${
+              activeTab === "products"
+                ? "border-b-2 border-accent text-accent"
+                : "text-muted-foreground"
+            }`}
+          >
+            Products
+          </button>
+          <button
+            onClick={() => setActiveTab("users")}
+            className={`pb-3 font-medium ${
+              activeTab === "users"
+                ? "border-b-2 border-accent text-accent"
+                : "text-muted-foreground"
+            }`}
+          >
+            Admins
+          </button>
+          <button
+            onClick={() => setActiveTab("orders")}
+            className={`pb-3 font-medium ${
+              activeTab === "orders"
+                ? "border-b-2 border-accent text-accent"
+                : "text-muted-foreground"
+            }`}
+          >
+            Orders
+          </button>
         </div>
-      )}
+      </div>
 
-      {loading ? (
-        <div className="flex justify-center items-center py-20">
-          <Loader2 className="h-10 w-10 animate-spin text-accent" />
-          <span className="ml-3">Loading products...</span>
-        </div>
-      ) : (
+      {activeTab === "products" && (
         <>
-          {/* Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-            {[
-              {
-                icon: Package,
-                label: "Total Products",
-                value: totalProducts,
-                color: "text-accent",
-              },
-              {
-                icon: ShoppingBag,
-                label: "In Stock",
-                value: inStock,
-                color: "text-emerald-500",
-              },
-              {
-                icon: Package,
-                label: "Low Stock",
-                value: lowStock,
-                color: "text-yellow-500",
-              },
-              {
-                icon: Package,
-                label: "Out of Stock",
-                value: outOfStock,
-                color: "text-destructive",
-              },
-              {
-                icon: DollarSign,
-                label: "Inventory Value",
-                value: formatPrice(totalValue),
-                color: "text-accent",
-              },
-            ].map(({ icon: Icon, label, value, color }) => (
-              <div
-                key={label}
-                className="bg-card rounded-lg border p-5 shadow-sm"
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className={`h-8 w-8 ${color}`} />
-                  <div>
-                    <p className="text-sm text-muted-foreground">{label}</p>
-                    <p className="text-xl font-bold text-card-foreground">
-                      {value}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Stock Pie Chart */}
-          {totalProducts > 0 && (
-            <div className="bg-card rounded-lg border p-6 mb-8 shadow-sm">
-              <h2 className="text-lg font-semibold mb-4">Stock Distribution</h2>
-              <div className="max-w-xs mx-auto">
-                <Pie
-                  data={pieData}
-                  options={{
-                    responsive: true,
-                    plugins: { legend: { position: "bottom" } },
-                  }}
-                />
-              </div>
+          {fetchError && (
+            <div className="bg-destructive/20 text-destructive p-4 rounded-md mb-6">
+              {fetchError}
             </div>
           )}
 
-          {/* Products Table + Add Button */}
-          <div className="bg-card rounded-lg border overflow-hidden shadow-sm">
-            <div className="p-4 border-b flex justify-between items-center">
-              <h2 className="text-lg font-semibold">Products</h2>
-              <button
-                onClick={openAddModal}
-                disabled={actionLoading}
-                className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:opacity-90 transition disabled:opacity-50"
-              >
-                <Plus size={18} />
-                Add Product
-              </button>
+          {loading ? (
+            <div className="flex justify-center items-center py-20">
+              <Loader2 className="h-10 w-10 animate-spin text-accent" />
+              <span className="ml-3">Loading products...</span>
             </div>
+          ) : (
+            <>
+              {/* Stats - unchanged */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                {[
+                  {
+                    icon: Package,
+                    label: "Total Products",
+                    value: totalProducts,
+                    color: "text-accent",
+                  },
+                  {
+                    icon: ShoppingBag,
+                    label: "In Stock",
+                    value: inStock,
+                    color: "text-emerald-500",
+                  },
+                  {
+                    icon: Package,
+                    label: "Low Stock",
+                    value: lowStock,
+                    color: "text-yellow-500",
+                  },
+                  {
+                    icon: Package,
+                    label: "Out of Stock",
+                    value: outOfStock,
+                    color: "text-destructive",
+                  },
+                  {
+                    icon: DollarSign,
+                    label: "Inventory Value",
+                    value: formatPrice(totalValue),
+                    color: "text-accent",
+                  },
+                ].map(({ icon: Icon, label, value, color }) => (
+                  <div
+                    key={label}
+                    className="bg-card rounded-lg border p-5 shadow-sm"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className={`h-8 w-8 ${color}`} />
+                      <div>
+                        <p className="text-sm text-muted-foreground">{label}</p>
+                        <p className="text-xl font-bold text-card-foreground">
+                          {value}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
+              {/* Pie Chart - unchanged */}
+              {totalProducts > 0 && (
+                <div className="bg-card rounded-lg border p-6 mb-8 shadow-sm">
+                  <h2 className="text-lg font-semibold mb-4">
+                    Stock Distribution
+                  </h2>
+                  <div className="max-w-xs mx-auto">
+                    <Pie
+                      data={pieData}
+                      options={{
+                        responsive: true,
+                        plugins: { legend: { position: "bottom" } },
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Existing Products Table - unchanged */}
+              <div className="bg-card rounded-lg border overflow-hidden shadow-sm">
+                <div className="p-4 border-b flex justify-between items-center">
+                  <h2 className="text-lg font-semibold">Products</h2>
+                  <button
+                    onClick={openAddModal}
+                    disabled={actionLoading}
+                    className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:opacity-90 transition disabled:opacity-50"
+                  >
+                    <Plus size={18} />
+                    Add Product
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="text-left px-6 py-3 font-semibold">
+                          ID
+                        </th>
+                        <th className="text-left px-6 py-3 font-semibold">
+                          Product
+                        </th>
+                        <th className="text-left px-6 py-3 font-semibold">
+                          Category
+                        </th>
+                        <th className="text-right px-6 py-3 font-semibold">
+                          Price
+                        </th>
+                        <th className="text-right px-6 py-3 font-semibold">
+                          Stock
+                        </th>
+                        <th className="text-center px-6 py-3 font-semibold">
+                          Featured
+                        </th>
+                        <th className="text-center px-6 py-3 font-semibold">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="text-center py-12 text-muted-foreground"
+                          >
+                            No products yet. Click "Add Product" to create one.
+                          </td>
+                        </tr>
+                      ) : (
+                        products.map((p) => (
+                          <tr
+                            key={p._id}
+                            className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                          >
+                            <td className="px-6 py-4 font-mono text-sm text-muted-foreground">
+                              {p.id || "—"}
+                            </td>
+                            <td className="px-6 py-4 font-medium">{p.name}</td>
+                            <td className="px-6 py-4 text-muted-foreground">
+                              {p.category}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              {formatPrice(p.price)}
+                            </td>
+                            <td className="px-6 py-4 text-right">{p.stock}</td>
+                            <td className="px-6 py-4 text-center">
+                              {p.featured ? (
+                                <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-green-500/20 text-green-700 dark:text-green-400">
+                                  Yes
+                                </span>
+                              ) : (
+                                <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-gray-500/20 text-gray-700 dark:text-gray-400">
+                                  No
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-center flex justify-center gap-4">
+                              <button
+                                onClick={() => openEditModal(p)}
+                                disabled={actionLoading}
+                                className="text-accent hover:text-accent/80 disabled:opacity-50"
+                                title="Edit"
+                              >
+                                <Edit size={18} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(p._id)}
+                                disabled={actionLoading}
+                                className="text-destructive hover:text-destructive/80 disabled:opacity-50"
+                                title="Delete"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {activeTab === "users" && (
+        <div className="bg-card rounded-lg border p-6 shadow-sm">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <Users size={20} /> Manage Admins
+          </h2>
+
+          {loadingAdmins ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-accent" />
+            </div>
+          ) : (
+            <>
+              {/* Add Admin Form */}
+              <form
+                onSubmit={handleAddAdmin}
+                className="mb-8 bg-muted/30 p-5 rounded-lg border"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm mb-1">Name</label>
+                    <input
+                      value={adminForm.name}
+                      onChange={(e) =>
+                        setAdminForm({ ...adminForm, name: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border rounded bg-background"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={adminForm.email}
+                      onChange={(e) =>
+                        setAdminForm({ ...adminForm, email: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border rounded bg-background"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">Password</label>
+                    <input
+                      type="password"
+                      value={adminForm.password}
+                      onChange={(e) =>
+                        setAdminForm({ ...adminForm, password: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border rounded bg-background"
+                      required
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      type="submit"
+                      className="bg-accent text-white px-6 py-2 rounded hover:opacity-90"
+                    >
+                      Add Admin
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Admins List */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left px-6 py-3">Name</th>
+                      <th className="text-left px-6 py-3">Email</th>
+                      <th className="text-center px-6 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {admins.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="text-center py-8 text-muted-foreground"
+                        >
+                          No admins added yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      admins.map((admin) => (
+                        <tr
+                          key={admin._id}
+                          className="border-b hover:bg-muted/30"
+                        >
+                          <td className="px-6 py-4">{admin.name}</td>
+                          <td className="px-6 py-4 text-muted-foreground">
+                            {admin.email}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button
+                              onClick={() => {
+                                if (confirm(`Remove ${admin.name}?`)) {
+                                  axios
+                                    .delete(`${API_BASE}/admins/${admin._id}`)
+                                    .then(() => fetchAdmins())
+                                    .catch(() => alert("Delete failed"));
+                                }
+                              }}
+                              className="text-destructive hover:underline"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === "orders" && (
+        <div className="bg-card rounded-lg border p-6 shadow-sm">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <ShoppingCart size={20} /> Orders
+          </h2>
+
+          {loadingOrders ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-accent" />
+            </div>
+          ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left px-6 py-3 font-semibold">ID</th>
-                    <th className="text-left px-6 py-3 font-semibold">
-                      Product
-                    </th>
-                    <th className="text-left px-6 py-3 font-semibold">
-                      Category
-                    </th>
-                    <th className="text-right px-6 py-3 font-semibold">
-                      Price
-                    </th>
-                    <th className="text-right px-6 py-3 font-semibold">
-                      Stock
-                    </th>
-                    <th className="text-center px-6 py-3 font-semibold">
-                      Featured
-                    </th>
-                    <th className="text-center px-6 py-3 font-semibold">
-                      Actions
-                    </th>
+                    <th className="text-left px-6 py-3">Name</th>
+                    <th className="text-left px-6 py-3">Phone</th>
+                    <th className="text-left px-6 py-3">Email</th>
+                    <th className="text-center px-6 py-3">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {products.length === 0 ? (
+                  {orders.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={7}
-                        className="text-center py-12 text-muted-foreground"
+                        colSpan={4}
+                        className="text-center py-8 text-muted-foreground"
                       >
-                        No products yet. Click "Add Product" to create one.
+                        No orders received yet.
                       </td>
                     </tr>
                   ) : (
-                    products.map((p) => (
+                    orders.map((order) => (
                       <tr
-                        key={p._id}
-                        className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                        key={order._id}
+                        className="border-b hover:bg-muted/30"
                       >
-                        <td className="px-6 py-4 font-mono text-sm text-muted-foreground">
-                          {p._id || "—"}
-                        </td>
-                        <td className="px-6 py-4 font-medium">{p.name}</td>
+                        <td className="px-6 py-4">{order.customerName}</td>
+                        <td className="px-6 py-4">{order.phone}</td>
                         <td className="px-6 py-4 text-muted-foreground">
-                          {p.category}
+                          {order.email}
                         </td>
-                        <td className="px-6 py-4 text-right">
-                          {formatPrice(p.price)}
-                        </td>
-                        <td className="px-6 py-4 text-right">{p.stock}</td>
                         <td className="px-6 py-4 text-center">
-                          {p.featured ? (
-                            <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-green-500/20 text-green-700 dark:text-green-400">
-                              Yes
-                            </span>
-                          ) : (
-                            <span className="inline-block px-2.5 py-1 text-xs font-medium rounded-full bg-gray-500/20 text-gray-700 dark:text-gray-400">
-                              No
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-center flex justify-center gap-4">
-                          <button
-                            onClick={() => openEditModal(p)}
-                            disabled={actionLoading}
-                            className="text-accent hover:text-accent/80 disabled:opacity-50"
-                            title="Edit"
+                          <span
+                            className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
+                              order.status === "Delivered"
+                                ? "bg-green-500/20 text-green-700"
+                                : order.status === "Paid"
+                                  ? "bg-blue-500/20 text-blue-700"
+                                  : order.status === "Pending"
+                                    ? "bg-yellow-500/20 text-yellow-700"
+                                    : "bg-red-500/20 text-red-700"
+                            }`}
                           >
-                            <Edit size={18} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(p._id)}
-                            disabled={actionLoading}
-                            className="text-destructive hover:text-destructive/80 disabled:opacity-50"
-                            title="Delete"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                            {order.status}
+                          </span>
                         </td>
                       </tr>
                     ))
@@ -442,11 +750,11 @@ export default function AdminDashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
-        </>
+          )}
+        </div>
       )}
 
-      {/* Add / Edit Modal */}
+      {/* Existing Product Modal - completely unchanged */}
       <Transition appear show={isModalOpen} as={Fragment}>
         <Dialog
           as="div"
