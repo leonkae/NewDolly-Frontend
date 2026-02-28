@@ -40,6 +40,7 @@ export const products: Product[] = [
     stock: 20,
     featured: true,
   },
+  
   {
     id: "5",
     name: "Crown Matt Emulsion Paint (5L)",
