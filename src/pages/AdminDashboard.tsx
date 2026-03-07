@@ -75,7 +75,7 @@ export default function AdminDashboard() {
   const [currentAdmin, setCurrentAdmin] = useState<any>(null);
 
   // Login form
-  const [loginEmail, setLoginEmail] = useState("leon29kae@gmail.com");
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
