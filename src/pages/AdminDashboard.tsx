@@ -416,7 +416,7 @@ export default function AdminDashboard() {
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-accent"
-                placeholder="leon29kae@gmail.com"
+                placeholder="you@gmail.com"
                 required
               />
             </div>
