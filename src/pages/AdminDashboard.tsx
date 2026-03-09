@@ -123,6 +123,7 @@ export default function AdminDashboard() {
     featured: false,
   });
 
+  
   // Check for existing session on mount
   useEffect(() => {
     const storedToken = localStorage.getItem("adminToken");
